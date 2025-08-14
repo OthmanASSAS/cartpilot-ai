@@ -3,18 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "NODE_OPTIONS=--dns-result-order=ipv4first next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "dotenv -e .env.local -- pnpm prisma migrate dev"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.59.0",
     "@clerk/nextjs": "^6.30.0",
     "@prisma/client": "^6.13.0",
+    "@radix-ui/react-label": "^2.1.7",
     "@radix-ui/react-slot": "^1.2.3",
     "@supabase/supabase-js": "^2.54.0",
     "@upstash/redis": "^1.35.3",
+    "axios": "^1.11.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.12",
@@ -25,6 +28,7 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "tailwind-merge": "^3.3.1",
+    "undici": "^7.13.0",
     "zod": "^4.0.17"
   },
   "devDependencies": {
