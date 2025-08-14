@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { CheckCircle, X, Star, Mail, Store, Globe } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
+import { UpsellWidget } from "@/components/UpsellWidget";
 
 export default function Home() {
   // États pour gérer l'affichage des modales
@@ -304,6 +305,9 @@ export default function Home() {
             </div>
           </div>
         </motion.section>
+
+        {/* Upsell Widget Test Section */}
+        <UpsellWidget />
 
         {/* Modale Formulaire Essai Gratuit */}
         {showTrialForm && (

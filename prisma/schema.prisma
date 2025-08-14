@@ -1,0 +1,136 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  // output   = "@prisma/client" // Default, works well with Vercel
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL") // Pour le client Prisma (pooling)
+  directUrl = env("DIRECT_URL")   // Pour les migrations (connexion directe)
+}
+
+// ##################################
+// # ENUMS - Nos types personnalisés
+// ##################################
+
+enum UserPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum ShopPlatform {
+  SHOPIFY
+  WOOCOMMERCE
+}
+
+enum AgentType {
+  SALES
+  MARKETING
+  SUPPORT
+  DATA_ANALYST
+}
+
+enum LeadSource {
+  LANDING
+  LINKEDIN
+  MANUAL
+  OTHER
+}
+
+
+// ##################################
+// # MODELS - Le coeur de notre data
+// ##################################
+
+// Le modèle User représente nos clients.
+// Il est lié à l'authentification (Clerk) par son ID.
+model User {
+  id        String   @id // Utilise l'ID de Clerk, qui est un string.
+  email     String   @unique
+  firstName String?
+  lastName  String?
+
+  plan         UserPlan @default(FREE)
+  credits      Int      @default(100) // Crédits IA pour le pay-per-use
+  stripeCustomerId String?  @unique // Pour la facturation avec Stripe plus tard
+
+  shops Shop[] // Un utilisateur peut avoir plusieurs boutiques.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Le modèle Shop représente une boutique e-commerce connectée par un User.
+model Shop {
+  id        String       @id @default(cuid())
+  platform  ShopPlatform
+  domain    String       @unique // ex: "ma-boutique.myshopify.com"
+  
+  // Relation avec l'utilisateur propriétaire
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Le token pour accéder à l'API de la plateforme (ex: Shopify API Token)
+  // On devra l'encrypter avant de le stocker.
+  accessToken String?
+
+  products Product[] // Une boutique a plusieurs produits.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Le modèle Product représente un produit d'une boutique.
+model Product {
+  id          String @id @default(cuid())
+  externalId  String // L'ID du produit sur la plateforme externe (ex: Shopify)
+  
+  name        String
+  description String?
+  price       Float
+  imageUrl    String?
+
+  // Relation avec la boutique
+  shopId String
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  suggestions Suggestion[] // Un produit peut avoir plusieurs suggestions IA.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([shopId, externalId]) // Un produit est unique par boutique.
+}
+
+// Le modèle Suggestion représente une recommandation générée par un agent IA.
+model Suggestion {
+  id          String    @id @default(cuid())
+  agentType   AgentType
+  
+  generatedText String    @db.Text // Le contenu de la suggestion.
+  model         String?   // Le modèle d'IA utilisé (ex: "gpt-4-mini")
+  costTokens    Int       @default(0)
+
+  // Relation avec le produit concerné
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+model Lead {
+  id            String      @id @default(cuid())
+  email         String
+  boutiqueName  String
+  shopUrl       String?
+  consent       Boolean     @default(false)
+  source        LeadSource  @default(LANDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@unique([email])
+}
