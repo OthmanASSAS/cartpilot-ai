@@ -2,7 +2,6 @@ import { PrismaClient } from "@prisma/client";
 
 // Évite de recréer un client Prisma à chaud en dev
 declare global {
-  // eslint-disable-next-line no-var
   var prismaGlobal: PrismaClient | undefined;
 }
 

@@ -34,6 +34,16 @@ type Cart = {
   total: number;
 };
 
+interface AIResult {
+  provider: string;
+  response: {
+    suggestions: { product_name: string; reason: string; estimated_price: number }[];
+  };
+  err?: string;
+  ms?: number;
+  fallbackReason?: string;
+}
+
 /** Utils */
 function timingSafeEqual(a: string, b: string) {
   const abuf = Buffer.from(a, "utf8");
@@ -131,7 +141,7 @@ export async function POST(request: Request) {
   console.log("[ShopifyWebhook] Panier normalisé:", { requestId, cart });
 
   // 5) Appeler l’agent IA local
-  let aiResult: any = null;
+  let aiResult: AIResult | null = null;
   const ctrl = new AbortController();
   const TO = setTimeout(() => ctrl.abort(), 15_000);
 
@@ -156,9 +166,10 @@ export async function POST(request: Request) {
     } else {
       aiResult = JSON.parse(text);
     }
-  } catch (e) {
+  } catch (e: unknown) {
     clearTimeout(TO);
-    console.error("[ShopifyWebhook] AI agent fetch failed", { requestId, message: e?.message });
+    const message = e instanceof Error ? e.message : "Unknown fetch error";
+    console.error("[ShopifyWebhook] AI agent fetch failed", { requestId, message });
     aiResult = { provider: "fallback", response: { suggestions: [] }, err: "AI_AGENT_FETCH" };
   }
 

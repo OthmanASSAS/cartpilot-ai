@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
+interface Suggestion {
+  product_name: string;
+  reason: string;
+  estimated_price: number;
+}
+
 interface CartItem {
   id: string;
   name: string;
@@ -71,8 +77,8 @@ export async function POST(request: Request) {
   const requestId = crypto.randomUUID();
 
   let provider = "groq";
-  let model = "llama-3.1-8b-instant";
-  let suggestions = [];
+  const model = "llama-3.1-8b-instant";
+  let suggestions: Suggestion[] = [];
   let errorDetails: string | null = null;
 
   try {
@@ -99,8 +105,6 @@ export async function POST(request: Request) {
     try {
       console.log("[AI Agent] Calling Groq API (Llama 3.1 8B)...");
 
-      // Prompt optimisé pour Llama
-      // Prompt optimisé pour Llama — sans \n errants dans les expressions
       const lines = cart.items
         .map((i) => `- ${i.name}: €${i.price}`)
         .join('\n');
@@ -147,28 +151,24 @@ export async function POST(request: Request) {
 
       if (content) {
         try {
-          // Essayer de parser la réponse JSON
           const parsed = JSON.parse(content);
 
-          // Gérer différents formats de réponse possibles
+          let parsedSuggestions: unknown[] = [];
           if (parsed.products && Array.isArray(parsed.products)) {
-            suggestions = parsed.products;
+            parsedSuggestions = parsed.products;
           } else if (Array.isArray(parsed)) {
-            suggestions = parsed;
-          } else {
-            // Si le format est inattendu, créer des suggestions depuis l'objet
-            suggestions = [parsed].filter((s) => s.product_name);
+            parsedSuggestions = parsed;
           }
 
-          // Validation basique
-          suggestions = suggestions
-            .filter(
-              (s: { product_name: any; reason: any; estimated_price: any }) =>
-                s.product_name &&
-                s.reason &&
-                typeof s.estimated_price === "number"
-            )
-            .slice(0, 2);
+          suggestions = parsedSuggestions.filter(
+            (s): s is Suggestion =>
+              typeof s === 'object' &&
+              s !== null &&
+              'product_name' in s &&
+              'reason' in s &&
+              'estimated_price' in s &&
+              typeof (s as Suggestion).estimated_price === "number"
+          ).slice(0, 2);
 
           console.log("[AI Agent] Parsed suggestions:", suggestions);
         } catch (parseError) {
@@ -181,7 +181,6 @@ export async function POST(request: Request) {
         throw new Error("No valid suggestions generated");
       }
 
-      // Calcul du coût approximatif
       const tokensUsed = completion.usage?.total_tokens || 0;
       const costUSD =
         (completion.usage?.prompt_tokens || 0) * 0.00005 +
@@ -192,15 +191,18 @@ export async function POST(request: Request) {
         costUSD: costUSD.toFixed(6),
         responseTimeMs: Date.now() - startedAt,
       });
-    } catch (groqError: any) {
-      errorDetails = groqError?.message || "Groq API error";
+    } catch (groqError: unknown) {
+      if (groqError instanceof Error) {
+        errorDetails = groqError.message;
+      } else {
+        errorDetails = "Groq API error";
+      }
+      
       console.error("[AI Agent] Groq failed, using fallback:", {
         error: errorDetails,
-        code: groqError?.code,
         requestId,
       });
 
-      // Fallback local
       provider = "fallback";
       suggestions = getFallbackSuggestions(cart);
       console.log("[AI Agent] Using fallback suggestions:", suggestions);
@@ -223,18 +225,23 @@ export async function POST(request: Request) {
       ms: latencyMs,
       ...(provider === "fallback" && { fallbackReason: errorDetails }),
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     const latencyMs = Date.now() - startedAt;
+    let errorMessage = "Unknown error";
+    if (err instanceof Error) {
+      errorMessage = err.message;
+    }
+    
     console.error("[AI Agent] Complete failure:", {
       requestId,
       latencyMs,
-      error: err?.message,
+      error: errorMessage,
     });
 
     return NextResponse.json(
       {
         error: "Service temporairement indisponible",
-        details: err?.message || "Unknown error",
+        details: errorMessage,
         requestId,
       },
       { status: 500 }

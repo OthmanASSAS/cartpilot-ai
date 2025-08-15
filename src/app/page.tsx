@@ -1,7 +1,7 @@
 "use client"; // Requis pour les animations côté client avec Framer Motion
 
 import { Button } from "@/components/ui/button";
-import { CheckCircle, X, Star, Mail, Store, Globe } from "lucide-react";
+import { CheckCircle, X } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { UpsellWidget } from "@/components/UpsellWidget";
@@ -12,7 +12,6 @@ export default function Home() {
   const [showDemoForm, setShowDemoForm] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     email: "",
     boutique: "",
@@ -23,7 +22,6 @@ export default function Home() {
   // Fonction pour gérer la soumission du formulaire
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmitError(null);
     setIsSubmitting(true);
     try {
       const res = await fetch("/api/leads", {
@@ -41,7 +39,7 @@ export default function Home() {
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.error("Lead submit failed", err);
-        setSubmitError(err?.error ?? "Une erreur est survenue. Réessaie.");
+        // Note: L'erreur n'est pas affichée à l'utilisateur pour le moment.
         return;
       }
 
@@ -60,7 +58,6 @@ export default function Home() {
       setShowDemoForm(false);
     } catch (err) {
       console.error("Lead submit error", err);
-      setSubmitError("Impossible d'envoyer pour le moment. Réessaie.");
     } finally {
       setIsSubmitting(false);
     }
@@ -202,7 +199,7 @@ export default function Home() {
             >
               <div className="flex flex-col items-center gap-1">
                 <CheckCircle className="h-5 w-5 text-green-500" />
-                <span className="text-gray-700 text-center">30 jours d'essai gratuit</span>
+                <span className="text-gray-700 text-center">30 jours d&apos;essai gratuit</span>
               </div>
               <div className="flex flex-col items-center gap-1">
                 <CheckCircle className="h-5 w-5 text-green-500" />
@@ -259,7 +256,7 @@ export default function Home() {
                   Compatible avec tous les thèmes Shopify ?
                 </h3>
                 <p className="text-gray-600">
-                  Oui ! Notre agent IA s'intègre parfaitement avec tous les thèmes Shopify, 
+                  Oui ! Notre agent IA s&apos;intègre parfaitement avec tous les thèmes Shopify, 
                   même les plus personnalisés.
                 </p>
               </motion.div>
@@ -272,7 +269,7 @@ export default function Home() {
                   Fonctionne avec des produits digitaux ?
                 </h3>
                 <p className="text-gray-600">
-                  Absolument ! L'IA analyse le comportement d'achat, pas le type de produit. 
+                  Absolument ! L&apos;IA analyse le comportement d&apos;achat, pas le type de produit. 
                   Idéal pour tous les e-commerces.
                 </p>
               </motion.div>
@@ -285,8 +282,8 @@ export default function Home() {
                   Support en français ?
                 </h3>
                 <p className="text-gray-600">
-                  Oui, 7j/7 ! Notre équipe française est disponible pour t'accompagner 
-                  dans la configuration et l'optimisation.
+                  Oui, 7j/7 ! Notre équipe française est disponible pour t&apos;accompagner 
+                  dans la configuration et l&apos;optimisation.
                 </p>
               </motion.div>
 
@@ -298,7 +295,7 @@ export default function Home() {
                   Combien de temps pour voir les résultats ?
                 </h3>
                 <p className="text-gray-600">
-                  Dès le premier jour ! L'IA commence à analyser et suggérer immédiatement. 
+                  Dès le premier jour ! L&apos;IA commence à analyser et suggérer immédiatement. 
                   Les premiers résultats arrivent dans les 24h.
                 </p>
               </motion.div>
@@ -380,7 +377,7 @@ export default function Home() {
                     className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label className="text-sm text-gray-600">
-                    J'accepte de recevoir des conseils IA par email pour optimiser mes ventes
+                    J&apos;accepte de recevoir des conseils IA par email pour optimiser mes ventes
                   </label>
                 </div>
                 
@@ -463,7 +460,7 @@ export default function Home() {
                     className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                   />
                   <label className="text-sm text-gray-600">
-                    J'accepte de recevoir la démo et des conseils IA par email
+                    J&apos;accepte de recevoir la démo et des conseils IA par email
                   </label>
                 </div>
                 
@@ -504,7 +501,7 @@ export default function Home() {
                 </div>
                 <div className="flex items-start gap-3">
                   <CheckCircle className="h-5 w-5 text-green-500 mt-1" />
-                  <span className="text-gray-700">Vous recevrez votre accès par email dès que c'est prêt</span>
+                  <span className="text-gray-700">Vous recevrez votre accès par email dès que c&apos;est prêt</span>
                 </div>
               </div>
 

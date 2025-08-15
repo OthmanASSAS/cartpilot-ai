@@ -47,7 +47,7 @@ export function UpsellWidget() {
     setCartItems(cartItems.filter(item => item.id !== id));
   };
 
-  const handleItemChange = (id: string, field: keyof CartItem, value: any) => {
+  const handleItemChange = (id: string, field: keyof CartItem, value: string | number) => {
     setCartItems(cartItems.map(item => 
       item.id === id ? { ...item, [field]: field === 'name' ? value : Number(value) } : item
     ));
@@ -102,8 +102,12 @@ export function UpsellWidget() {
 
       const data: ApiResponse = await response.json();
       setSuggestions(data.response.suggestions);
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Une erreur inconnue est survenue.");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -113,7 +117,7 @@ export function UpsellWidget() {
     <section className="py-12 bg-gray-50 rounded-3xl my-8 shadow-lg">
       <div className="container mx-auto px-4 text-center">
         <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-6">
-          Testez notre Agent IA d'Upsell avec votre panier
+          Testez notre Agent IA d&apos;Upsell avec votre panier
         </h2>
         <p className="text-lg text-gray-600 mb-8">
           Ajoutez les produits de votre panier ci-dessous pour obtenir des suggestions personnalisées.
@@ -122,7 +126,7 @@ export function UpsellWidget() {
         <div className="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-md mb-8">
           <h3 className="text-xl font-semibold mb-4">Votre Panier Actuel</h3>
           <div className="space-y-4">
-            {cartItems.map((item, index) => (
+            {cartItems.map((item) => (
               <div key={item.id} className="flex items-end gap-4">
                 <div className="flex-1">
                   <Label htmlFor={`product-name-${item.id}`} className="sr-only">Nom du produit</Label>
@@ -189,7 +193,7 @@ export function UpsellWidget() {
           {isLoading ? (
             <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Génération en cours...</>
           ) : (
-            'Obtenir les suggestions IA'
+            "Obtenir les suggestions IA"
           )}
         </Button>
 
