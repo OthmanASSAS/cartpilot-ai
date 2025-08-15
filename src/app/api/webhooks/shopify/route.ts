@@ -168,6 +168,25 @@ export async function POST(request: Request) {
 
   // 4) Normaliser le panier
   const cart = normalizeCart(payload);
+  if (!cart.items.length || cart.total <= 0) {
+    console.log("[ShopifyWebhook] Panier vide → on n'appelle pas l'IA", {
+      requestId,
+      total: cart.total,
+      items: cart.items.length,
+    });
+
+    return NextResponse.json(
+      {
+        ok: true,
+        requestId,
+        latencyMs: Date.now() - startedAt,
+        cart,
+        ai: { provider: "skip", response: { suggestions: [] } },
+      },
+      { status: 200 }
+    );
+  }
+
   console.log("[ShopifyWebhook] Panier normalisé:", { requestId, cart });
 
   // Persist CartSnapshot
