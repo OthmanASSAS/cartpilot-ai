@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
+import prisma from "@/lib/prisma";
 
 // Exécution côté Node
 export const runtime = "nodejs";
@@ -37,7 +38,11 @@ type Cart = {
 interface AIResult {
   provider: string;
   response: {
-    suggestions: { product_name: string; reason: string; estimated_price: number }[];
+    suggestions: {
+      product_name: string;
+      reason: string;
+      estimated_price: number;
+    }[];
   };
   err?: string;
   ms?: number;
@@ -82,6 +87,9 @@ function normalizeCart(payload: ShopifyCartPayload): Cart {
 }
 
 export async function POST(request: Request) {
+  console.log("[ShopifyWebhook] ➡️ Webhook reçu", {
+    headers: Object.fromEntries(request.headers.entries()),
+  });
   const startedAt = Date.now();
   const requestId = crypto.randomUUID();
 
@@ -109,6 +117,28 @@ export async function POST(request: Request) {
 
   // 2) Vérifier la signature
   const ok = verifyShopifyHmac(raw, secret, providedSig);
+  if (ok) {
+    console.log("[ShopifyWebhook] ✅ Webhook reçu et signature valide");
+  } else {
+    console.warn("[ShopifyWebhook] ❌ Webhook reçu mais signature invalide");
+  }
+
+  // Persist WebhookEvent
+  try {
+    await prisma.webhookEvent.create({
+      data: {
+        topic: "carts/update", // Assuming this webhook is for cart updates
+        rawBody: raw,
+        hmacValid: ok,
+      },
+    });
+  } catch (e) {
+    console.error("[ShopifyWebhook] Failed to save WebhookEvent", {
+      requestId,
+      e,
+    });
+  }
+
   if (!ok) {
     console.warn("[ShopifyWebhook] Invalid HMAC signature", { requestId });
     return NextResponse.json(
@@ -140,6 +170,22 @@ export async function POST(request: Request) {
   const cart = normalizeCart(payload);
   console.log("[ShopifyWebhook] Panier normalisé:", { requestId, cart });
 
+  // Persist CartSnapshot
+  try {
+    await prisma.cartSnapshot.create({
+      data: {
+        cartToken: payload.token || "unknown",
+        total: cart.total,
+        items: cart.items,
+      },
+    });
+  } catch (e) {
+    console.error("[ShopifyWebhook] Failed to save CartSnapshot", {
+      requestId,
+      e,
+    });
+  }
+
   // 5) Appeler l’agent IA local
   let aiResult: AIResult | null = null;
   const ctrl = new AbortController();
@@ -162,15 +208,26 @@ export async function POST(request: Request) {
         status: res.status,
         bodyPreview: text.slice(0, 300),
       });
-      aiResult = { provider: "fallback", response: { suggestions: [] }, err: "AI_AGENT_HTTP" };
+      aiResult = {
+        provider: "fallback",
+        response: { suggestions: [] },
+        err: "AI_AGENT_HTTP",
+      };
     } else {
       aiResult = JSON.parse(text);
     }
   } catch (e: unknown) {
     clearTimeout(TO);
     const message = e instanceof Error ? e.message : "Unknown fetch error";
-    console.error("[ShopifyWebhook] AI agent fetch failed", { requestId, message });
-    aiResult = { provider: "fallback", response: { suggestions: [] }, err: "AI_AGENT_FETCH" };
+    console.error("[ShopifyWebhook] AI agent fetch failed", {
+      requestId,
+      message,
+    });
+    aiResult = {
+      provider: "fallback",
+      response: { suggestions: [] },
+      err: "AI_AGENT_FETCH",
+    };
   }
 
   const latency = Date.now() - startedAt;
@@ -180,7 +237,11 @@ export async function POST(request: Request) {
     suggestions: aiResult?.response?.suggestions?.length ?? 0,
     provider: aiResult?.provider,
   });
-
+  console.log("[ShopifyWebhook] ✅ Traitement terminé", {
+    requestId,
+    total: cart.total,
+    itemCount: cart.items.length,
+  });
   // 6) Réponse 200 à Shopify (toujours), mais on renvoie aussi nos infos pour debug
   return NextResponse.json(
     {

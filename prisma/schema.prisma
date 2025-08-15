@@ -134,3 +134,19 @@ model Lead {
 
   @@unique([email])
 }
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  topic      String
+  rawBody    Json
+  hmacValid  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+}
+
+model CartSnapshot {
+  id        String   @id @default(cuid())
+  cartToken String
+  total     Float
+  items     Json
+  createdAt DateTime @default(now())
+}
