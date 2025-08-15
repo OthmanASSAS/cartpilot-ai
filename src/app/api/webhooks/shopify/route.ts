@@ -192,7 +192,7 @@ export async function POST(request: Request) {
   const TO = setTimeout(() => ctrl.abort(), 15_000);
 
   try {
-    const res = await fetch("http://localhost:3001/api/ai-agent", {
+    const res = await fetch(`${process.env.AI_AGENT_BASE_URL}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cart }),
