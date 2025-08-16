@@ -137,7 +137,9 @@ model Lead {
 
 model WebhookEvent {
   id         String   @id @default(cuid())
+  webhookId  String   @unique @db.VarChar(64) // ← pour idempotence
   topic      String
+  shop       String?            // ← nouveau
   rawBody    Json
   hmacValid  Boolean  @default(false)
   createdAt  DateTime @default(now())
@@ -149,4 +151,17 @@ model CartSnapshot {
   total     Float
   items     Json
   createdAt DateTime @default(now())
+}
+
+model SuggestionLog {
+  id           String   @id @default(cuid())
+  requestId    String   @db.VarChar(64)
+  cartToken    String?  @db.VarChar(128)
+  provider     String   @db.VarChar(32)
+  model        String?  @db.VarChar(64)
+  payload      Json      // réponse IA brute (ou normalisée)
+  createdAt    DateTime  @default(now())
+
+  @@index([cartToken])
+  @@index([createdAt])
 }
