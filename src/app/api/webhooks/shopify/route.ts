@@ -123,20 +123,28 @@ export async function POST(request: Request) {
     console.warn("[ShopifyWebhook] ❌ Webhook reçu mais signature invalide");
   }
 
-  // Persist WebhookEvent
+  // Persist WebhookEvent with idempotence
+  const webhookId = hdr["x-shopify-webhook-id"] as string | undefined;
+  const topic = hdr["x-shopify-topic"] as string | undefined;
+  const shop = hdr["x-shopify-shop-domain"] as string | undefined;
+
   try {
     await prisma.webhookEvent.create({
       data: {
-        topic: "carts/update", // Assuming this webhook is for cart updates
+        webhookId: webhookId ?? `legacy_${crypto.randomUUID()}`, // safeguard (ne devrait pas arriver)
+        topic: topic ?? "unknown",
+        shop: shop,
         rawBody: raw,
         hmacValid: ok,
       },
     });
-  } catch (e) {
-    console.error("[ShopifyWebhook] Failed to save WebhookEvent", {
-      requestId,
-      e,
-    });
+  } catch (e: any) {
+    // Prisma P2002 = unique violation
+    if (e.code === "P2002") {
+      console.warn("[ShopifyWebhook] Duplicate webhook received, deduped.", { requestId, webhookId });
+      return NextResponse.json({ ok: true, deduped: true }, { status: 200 });
+    }
+    console.error("[ShopifyWebhook] Failed to save WebhookEvent", { requestId, e });
   }
 
   if (!ok) {
@@ -256,10 +264,31 @@ export async function POST(request: Request) {
     suggestions: aiResult?.response?.suggestions?.length ?? 0,
     provider: aiResult?.provider,
   });
+
+  // Persist SuggestionLog
+  try {
+    await prisma.suggestionLog.create({
+      data: {
+        requestId,
+        cartToken: payload.token ?? null,
+        provider: aiResult?.provider ?? "unknown",
+        model: (aiResult as any)?.model ?? null, // Assuming model is part of aiResult
+        payload: aiResult ?? {},
+      },
+    });
+  } catch (e) {
+    console.error("[ShopifyWebhook] Failed to save SuggestionLog", { requestId, e });
+  }
+
   console.log("[ShopifyWebhook] ✅ Traitement terminé", {
     requestId,
+    webhookId: hdr["x-shopify-webhook-id"],
+    topic: hdr["x-shopify-topic"],
+    shop: hdr["x-shopify-shop-domain"],
+    items: cart.items.length,
     total: cart.total,
-    itemCount: cart.items.length,
+    aiProvider: aiResult?.provider,
+    aiMs: aiResult?.ms,
   });
   // 6) Réponse 200 à Shopify (toujours), mais on renvoie aussi nos infos pour debug
   return NextResponse.json(
