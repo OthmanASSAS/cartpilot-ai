@@ -1,5 +1,4 @@
 // /Users/oassas/Projets/cartpilot-ai/src/app/dashboard/page.tsx
-"use client"; // Add use client directive
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -9,18 +8,34 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogTrigger,
-} from "@/components/ui/dialog"; // Import Dialog components
-import { Button } from "@/components/ui/button"; // Import Button
+import { JsonViewerButton } from "@/components/ui/JsonViewerButton"; // Import JsonViewerButton
 import prisma from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { format } from "date-fns";
-import { useState } from "react"; // Import useState
+
+type CartItem = {
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+};
+
+interface Suggestion {
+  product_name: string;
+  reason: string;
+  estimated_price: number;
+}
+
+interface AIResultPayload {
+  provider: string;
+  model?: string;
+  response: {
+    suggestions: Suggestion[];
+  };
+  err?: string;
+  ms?: number;
+  fallbackReason?: string;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -31,9 +46,6 @@ const short = (s: string | null | undefined, n = 10) => {
 };
 
 export default async function DashboardPage() {
-  const [showJsonDialog, setShowJsonDialog] = useState(false);
-  const [jsonContent, setJsonContent] = useState("");
-
   const webhookEvents = await prisma.webhookEvent.findMany({
     take: 20,
     orderBy: { createdAt: "desc" },
@@ -51,11 +63,6 @@ export default async function DashboardPage() {
     orderBy: { createdAt: "desc" },
     select: { id: true, requestId: true, cartToken: true, provider: true, model: true, createdAt: true, payload: true },
   });
-
-  const handleViewJson = (content: any) => {
-    setJsonContent(JSON.stringify(content, null, 2));
-    setShowJsonDialog(true);
-  };
 
   return (
     <div className="container mx-auto py-8">
@@ -75,7 +82,7 @@ export default async function DashboardPage() {
                   <TableHead>Webhook ID</TableHead>
                   <TableHead>Shop</TableHead>
                   <TableHead>Reçu le</TableHead>
-                  <TableHead>Raw Body</TableHead> {/* New column for Raw Body */}
+                  <TableHead>Raw Body</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -87,9 +94,7 @@ export default async function DashboardPage() {
                     <TableCell>{event.shop ?? "N/A"}</TableCell>
                     <TableCell>{format(event.createdAt, "dd/MM/yyyy HH:mm:ss")}</TableCell>
                     <TableCell>
-                      <Button variant="outline" size="sm" onClick={() => handleViewJson(event.rawBody)}>
-                        Voir JSON
-                      </Button>
+                      <JsonViewerButton jsonData={event.rawBody} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -110,7 +115,7 @@ export default async function DashboardPage() {
                   <TableHead>Total</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Créé le</TableHead>
-                  <TableHead>Raw Items</TableHead> {/* New column for Raw Items */}
+                  <TableHead>Raw Items</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -118,12 +123,10 @@ export default async function DashboardPage() {
                   <TableRow key={snapshot.id}>
                     <TableCell>{short(snapshot.cartToken, 10)}</TableCell>
                     <TableCell>{snapshot.total.toFixed(2)}€</TableCell>
-                    <TableCell>{(snapshot.items as any).length} items</TableCell>
+                    <TableCell>{(snapshot.items as Prisma.JsonValue as CartItem[]).length} items</TableCell>
                     <TableCell>{format(snapshot.createdAt, "dd/MM/yyyy HH:mm:ss")}</TableCell>
                     <TableCell>
-                      <Button variant="outline" size="sm" onClick={() => handleViewJson(snapshot.items)}>
-                        Voir JSON
-                      </Button>
+                      <JsonViewerButton jsonData={snapshot.items} />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -147,7 +150,7 @@ export default async function DashboardPage() {
                 <TableHead>Modèle</TableHead>
                 <TableHead>Suggestions</TableHead>
                 <TableHead>Créé le</TableHead>
-                <TableHead>Payload</TableHead> {/* New column for Payload */}
+                <TableHead>Payload</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -158,13 +161,11 @@ export default async function DashboardPage() {
                   <TableCell>{log.provider}</TableCell>
                   <TableCell>{log.model ?? "N/A"}</TableCell>
                   <TableCell>
-                    {(log.payload as any)?.response?.suggestions?.map((s: any) => s.product_name).join(", ") || "N/A"}
+                    {((log.payload as unknown) as AIResultPayload)?.response?.suggestions?.map((s) => s.product_name).join(", ") || "N/A"}
                   </TableCell>
                   <TableCell>{format(log.createdAt, "dd/MM/yyyy HH:mm:ss")}</TableCell>
                   <TableCell>
-                    <Button variant="outline" size="sm" onClick={() => handleViewJson(log.payload)}>
-                      Voir JSON
-                    </Button>
+                    <JsonViewerButton jsonData={log.payload} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -172,20 +173,6 @@ export default async function DashboardPage() {
           </Table>
         </CardContent>
       </Card>
-
-      <Dialog open={showJsonDialog} onOpenChange={setShowJsonDialog}>
-        <DialogContent className="sm:max-w-[800px]">
-          <DialogHeader>
-            <DialogTitle>Contenu JSON</DialogTitle>
-            <DialogDescription>
-              Contenu brut de l'événement/snapshot/suggestion.
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="mt-4 p-4 bg-gray-100 rounded-md overflow-auto max-h-[60vh]">
-            <code>{jsonContent}</code>
-          </pre>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

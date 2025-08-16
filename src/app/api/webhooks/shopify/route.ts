@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import prisma from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 // Exécution côté Node
 export const runtime = "nodejs";
@@ -37,6 +38,7 @@ type Cart = {
 
 interface AIResult {
   provider: string;
+  model?: string; // Added model property
   response: {
     suggestions: {
       product_name: string;
@@ -138,9 +140,9 @@ export async function POST(request: Request) {
         hmacValid: ok,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) { // Changed to unknown
     // Prisma P2002 = unique violation
-    if (e.code === "P2002") {
+    if (typeof e === 'object' && e !== null && 'code' in e && (e as { code: string }).code === "P2002") { // Type narrowing
       console.warn("[ShopifyWebhook] Duplicate webhook received, deduped.", { requestId, webhookId });
       return NextResponse.json({ ok: true, deduped: true }, { status: 200 });
     }
@@ -206,7 +208,7 @@ export async function POST(request: Request) {
         items: cart.items,
       },
     });
-  } catch (e) {
+  } catch (e: unknown) { // Changed to unknown
     console.error("[ShopifyWebhook] Failed to save CartSnapshot", {
       requestId,
       e,
@@ -272,11 +274,11 @@ export async function POST(request: Request) {
         requestId,
         cartToken: payload.token ?? null,
         provider: aiResult?.provider ?? "unknown",
-        model: (aiResult as any)?.model ?? null, // Assuming model is part of aiResult
-        payload: aiResult ?? {},
+        model: aiResult?.model ?? null, // Assuming model is part of aiResult
+        payload: aiResult as Prisma.JsonValue ?? {},
       },
     });
-  } catch (e) {
+  } catch (e: unknown) { // Changed to unknown
     console.error("[ShopifyWebhook] Failed to save SuggestionLog", { requestId, e });
   }
 
