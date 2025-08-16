@@ -1,34 +1,69 @@
-// /app/api/suggestions/route.ts
-import { NextResponse } from 'next/server'
+import { NextResponse } from "next/server";
 
-const allowedOrigin = 'https://soforino.com' //  sécuriser au domaine précis
+const allowedOrigin = "https://soforino.com";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url)
-  const cartToken = searchParams.get('cart_token')
+export async function POST(req: Request) {
+  const { cart } = await req.json();
+  console.log("[CartPilot] Cart reçu:", cart);
 
-  console.log('[CartPilot] API hit with cart_token:', cartToken)
+  // Construire un prompt simple pour Groq
+  const prompt = `
+  Voici le contenu du panier :
+  ${cart.items.map((i: any) => `- ${i.title} (x${i.quantity})`).join("\n")}
 
-  const res = NextResponse.json({
-    suggestions: [
-      { id: '1', title: 'Produit A', price: 19.99 },
-      { id: '2', title: 'Produit B', price: 29.99 }
-    ]
-  })
+  Suggère 2 produits complémentaires ou alternatifs, au format JSON :
+  [{"id":"string","title":"string","price":number}]
+  `;
 
-  //  ajoute les headers CORS
-  res.headers.set('Access-Control-Allow-Origin', allowedOrigin)
-  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  try {
+    // ⚡ Exemple appel à l’API Groq
+    const groqRes = await fetch(
+      "https://api.groq.com/openai/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "llama-3.1-8b-instant", // ou un autre modèle dispo
+          messages: [{ role: "user", content: prompt }],
+          temperature: 0.7,
+          max_tokens: 300,
+        }),
+      }
+    );
+    const groqData = await groqRes.json();
+    const text = groqData.choices?.[0]?.message?.content?.trim() || "[]";
 
-  return res
+    let suggestions = [];
+    try {
+      suggestions = JSON.parse(text);
+    } catch {
+      suggestions = [];
+    }
+
+    const res = NextResponse.json({ suggestions });
+    res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+    res.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+    res.headers.set(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization"
+    );
+    return res;
+  } catch (err) {
+    console.error("[CartPilot] erreur Groq", err);
+    return NextResponse.json({ suggestions: [] }, { status: 500 });
+  }
 }
 
-// Pour gérer les preflight requests (OPTIONS)
 export async function OPTIONS() {
-  const res = new NextResponse(null, { status: 204 })
-  res.headers.set('Access-Control-Allow-Origin', allowedOrigin)
-  res.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization')
-  return res
+  const res = new NextResponse(null, { status: 204 });
+  res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
+  res.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.headers.set(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
+  return res;
 }
