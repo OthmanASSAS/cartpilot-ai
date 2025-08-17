@@ -1,33 +1,54 @@
 // /app/api/suggestions/route.ts
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 
+/** Autoriser uniquement ton domaine (ajouter le staging plus tard si besoin) */
 const allowedOrigin = "https://soforino.com";
 
-/* ------------ Types Shopify (simplifiés aux champs utilisés) ------------ */
-type CartItem = {
+/* ------------------------ Types Shopify (simplifiés) ------------------------ */
+type ShopifyVariant = {
+  id: number | string;
+  available?: boolean;
+  price?: number | string; // "59.99" côté /products.json
+};
+
+type ShopifyProduct = {
+  id: number | string;
   title: string;
-  quantity: number;
-  price: number; // en cents dans /cart.js
+  handle: string;
+  image?: { src?: string };
+  images?: Array<{ src?: string }>;
+  variants?: ShopifyVariant[];
+  price?: number | string; // parfois présent côté recommendations
+};
+
+type CartItem = {
+  title?: string;
+  quantity?: number;
+  price?: number; // en cents (/cart.js)
+  product_id?: number | string;
+  variant_id?: number | string;
+  id?: number | string; // parfois = variant_id
 };
 
 type Cart = {
   items: CartItem[];
-  total_price?: number;
+  total_price?: number; // cents
+  item_count?: number;
 };
 
-/* ---------------------- Types pour la réponse IA ----------------------- */
+/* ---------------------- Types réponse widget / front ----------------------- */
 export type Suggestion = {
   id: string;
   title: string;
-  price: number;
+  price?: number; // en euros
   reason?: string;
+  handle?: string;
+  image?: string;
+  variant_id?: string; // présent si ajout direct possible (1 variante)
+  has_multiple_variants?: boolean;
 };
 
-type GroqMessage = { role: "system" | "user" | "assistant"; content: string };
-type GroqChoice = { message?: { content?: string } };
-type GroqResponse = { choices?: GroqChoice[] };
-
-/* ------------------------------ Utils --------------------------------- */
+/* --------------------------------- Utils ---------------------------------- */
 function corsify(res: NextResponse) {
   res.headers.set("Access-Control-Allow-Origin", allowedOrigin);
   res.headers.set("Vary", "Origin");
@@ -40,155 +61,235 @@ function corsify(res: NextResponse) {
   return res;
 }
 
-function normalizeSuggestions(input: unknown): Suggestion[] {
-  if (!Array.isArray(input)) return [];
-  return input.slice(0, 2).map(
-    (s): Suggestion => ({
-      id: String((s as { id?: unknown }).id ?? ""),
-      title: String((s as { title?: unknown }).title ?? "Produit recommandé"),
-      price: (() => {
-        const val = (s as { price?: unknown }).price;
-        const n = typeof val === "number" ? val : Number(val);
-        return Number.isFinite(n) ? n : 0;
-      })(),
-      reason: (() => {
-        const val = (s as { reason?: unknown }).reason;
-        return val != null ? String(val) : undefined;
-      })(),
-    })
-  );
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
 }
 
-function extractJsonArray(text: string): unknown {
-  const m = text.match(/\[[\s\S]*\]/);
-  const json = m ? m[0] : text;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return [];
+function isCart(v: unknown): v is Cart {
+  return isObj(v) && Array.isArray((v as Record<string, unknown>).items);
+}
+
+/** Convertit "59.99" | 59.99 | undefined -> number (euros) */
+function asEuroNumber(v: unknown): number | undefined {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v.replace(",", "."));
+    return Number.isFinite(n) ? n : undefined;
   }
+  return undefined;
 }
 
-/* -------------------------------- GET --------------------------------- */
+/** Extrait la 1re image disponible */
+function firstImage(p: ShopifyProduct): string | undefined {
+  return p.image?.src || p.images?.[0]?.src || undefined;
+}
+
+/** Détermine la variant "ajoutable" et s'il y a plusieurs variantes */
+function getVariantInfo(p: ShopifyProduct): {
+  variantId?: string;
+  hasMultiple: boolean;
+} {
+  const vars = p.variants || [];
+  if (vars.length === 0) return { hasMultiple: false };
+  if (vars.length === 1) {
+    return { variantId: String(vars[0]?.id ?? ""), hasMultiple: false };
+  }
+  // plusieurs variantes → "Choisir" (pas d'ajout direct)
+  const avail = vars.find((v) => v.available) || vars[0];
+  return { variantId: String(avail?.id ?? ""), hasMultiple: true };
+}
+
+/** Transforme un produit Shopify en Suggestion */
+function productToSuggestion(p: ShopifyProduct): Suggestion {
+  const price =
+    asEuroNumber(p.variants?.[0]?.price) ??
+    asEuroNumber((p.variants || []).find((v) => v.available)?.price) ??
+    asEuroNumber(p.price);
+  const { variantId, hasMultiple } = getVariantInfo(p);
+  return {
+    id: String(p.id),
+    title: String(p.title),
+    price,
+    handle: p.handle,
+    image: firstImage(p),
+    variant_id: hasMultiple ? undefined : variantId,
+    has_multiple_variants: hasMultiple,
+  };
+}
+
+/** GET: stub simple pour test */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const cartToken = searchParams.get("cart_token");
-  console.log("[CartPilot] API hit with cart_token (GET):", cartToken);
+  console.log("[CartPilot] API hit (GET) cart_token:", cartToken);
 
   const res = NextResponse.json(
     {
       suggestions: [
         { id: "1", title: "Produit A", price: 19.99 },
         { id: "2", title: "Produit B", price: 29.99 },
-      ],
+      ] as Suggestion[],
     },
     { status: 200 }
   );
   return corsify(res);
 }
 
-/* -------------------------------- POST -------------------------------- */
-export async function POST(req: Request) {
-  if (!process.env.GROQ_API_KEY) {
-    return corsify(
-      NextResponse.json(
-        { error: "Server misconfigured: GROQ_API_KEY missing" },
-        { status: 500 }
-      )
-    );
-  }
+/* --------------------------- Collecte catalogue --------------------------- */
 
-  let body: unknown;
+async function fetchRecommendations(
+  shopOrigin: string,
+  productId: string
+): Promise<ShopifyProduct[]> {
+  const url = `${shopOrigin}/recommendations/products.json?product_id=${encodeURIComponent(
+    productId
+  )}&limit=8`;
   try {
-    body = await req.json();
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return [];
+    const data: unknown = await r.json();
+    if (Array.isArray(data)) return data as ShopifyProduct[];
+    if (
+      isObj(data) &&
+      Array.isArray((data as { products?: unknown }).products)
+    ) {
+      return (data as { products: unknown }).products as ShopifyProduct[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchAllProducts(shopOrigin: string): Promise<ShopifyProduct[]> {
+  const url = `${shopOrigin}/products.json?limit=50`;
+  try {
+    const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return [];
+    const data: unknown = await r.json();
+    if (
+      isObj(data) &&
+      Array.isArray((data as { products?: unknown }).products)
+    ) {
+      return (data as { products: unknown }).products as ShopifyProduct[];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+/* --------------------------------- POST ---------------------------------- */
+export async function POST(req: NextRequest) {
+  let raw: unknown;
+  try {
+    raw = await req.json();
   } catch {
     return corsify(
       NextResponse.json({ error: "Invalid JSON" }, { status: 400 })
     );
   }
 
-  const cart = (body as { cart?: unknown })?.cart as Cart | undefined;
-  if (!cart || !Array.isArray(cart.items)) {
+  const body = isObj(raw) ? (raw as Record<string, unknown>) : undefined;
+  const cart = body && isCart(body.cart) ? (body.cart as Cart) : undefined;
+  const shopOrigin =
+    body && typeof body.shopOrigin === "string" ? body.shopOrigin : undefined;
+
+  if (!cart?.items || !shopOrigin) {
     return corsify(
-      NextResponse.json({ error: "Missing cart.items" }, { status: 400 })
+      NextResponse.json(
+        { error: "Missing cart or shopOrigin" },
+        { status: 400 }
+      )
     );
   }
 
-  console.log("[CartPilot] Cart reçu:", {
-    itemCount: cart.items.length,
-    total_price: cart.total_price,
+  // Ensemble d'IDs produits déjà au panier (pour filtrer)
+  const inCartProductIds = new Set(
+    (cart.items || [])
+      .map((i) => String(i.product_id || i.id || ""))
+      .filter(Boolean)
+  );
+
+  // 1) Candidats via Shopify Recommendations par produit du panier
+  const productIds = Array.from(inCartProductIds);
+  const recsArrays = await Promise.all(
+    productIds.map((pid) => fetchRecommendations(shopOrigin, pid))
+  );
+  let candidates: ShopifyProduct[] = recsArrays.flat();
+
+  // 2) Fallback : lister des produits du shop si rien n'est revenu
+  if (candidates.length === 0) {
+    const all = await fetchAllProducts(shopOrigin);
+    candidates = all;
+  }
+
+  // 3) Filtrer (pas déjà au panier) & dédupliquer par product.id
+  const seen = new Set<string>();
+  const filtered: ShopifyProduct[] = [];
+  for (const p of candidates) {
+    const pid = String(p.id);
+    if (inCartProductIds.has(pid)) continue;
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    filtered.push(p);
+  }
+
+  // 4) Si aucun candidat exploitable → mode mono (actions utilitaires)
+  if (filtered.length === 0) {
+    const first = cart.items[0];
+    if (first) {
+      const vId = String(first.variant_id || first.id || "");
+      const title = String(first.title || "Produit");
+      const qty = Number(first.quantity || 1); // ← on s'en sert dans la raison
+      const suggestions: Suggestion[] = [
+        {
+          id: "add-one",
+          title: `Ajoutez un ${title}`,
+          reason: "Rechange ou cadeau",
+          variant_id: vId,
+        },
+        {
+          id: "to-three",
+          title: "Passez au pack de 3",
+          reason:
+            qty < 3 ? `Passez de ${qty} à 3 unités` : "Économies immédiates",
+          variant_id: vId,
+        },
+      ];
+      const res = NextResponse.json({ suggestions });
+      return corsify(res);
+    }
+    // Panier vide → rien
+    return corsify(NextResponse.json({ suggestions: [] }));
+  }
+
+  // 5) Ordonnancement simple (proche en prix du 1er item du panier)
+  const firstPriceEUR = (cart.items?.[0]?.price ?? 0) / 100;
+  filtered.sort((a, b) => {
+    const ap =
+      asEuroNumber(
+        a.variants?.[0]?.price ??
+          a.variants?.find((v) => v.available)?.price ??
+          a.price
+      ) ?? 0;
+    const bp =
+      asEuroNumber(
+        b.variants?.[0]?.price ??
+          b.variants?.find((v) => v.available)?.price ??
+          b.price
+      ) ?? 0;
+    return Math.abs(ap - firstPriceEUR) - Math.abs(bp - firstPriceEUR);
   });
 
-  const itemsList = cart.items
-    .map(
-      (i: CartItem) =>
-        `- ${i.title ?? "Unknown"} | qty:${i.quantity ?? 1} | price_cents:${
-          i.price ?? 0
-        }`
-    )
-    .join("\n");
+  // 6) Construire 2 suggestions max (catalogue uniquement)
+  const picked = filtered.slice(0, 2).map(productToSuggestion);
 
-  const userPrompt = `
-Tu es un expert e-commerce. En te basant UNIQUEMENT sur le panier ci-dessous,
-propose exactement 2 suggestions de produits complémentaires ou d'upsell.
-
-PANIER:
-${itemsList}
-
-CONTRAINTES DE SORTIE IMPORTANTES:
-- Réponds STRICTEMENT en JSON valide (UN tableau), sans texte autour.
-- Format: [{"id":"string","title":"string","price":number,"reason":"string"}]
-- "price" est un nombre en euros (ex: 29.99).
-- "reason" explique brièvement la pertinence (<= 12 mots).
-- N'invente pas de caractéristiques incompatibles (reste générique si doute).
-- Si aucune idée pertinente, propose 2 best-sellers génériques.
-`.trim();
-
-  try {
-    const groqRes = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-        },
-        cache: "no-store",
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            {
-              role: "system",
-              content:
-                "Tu réponds uniquement en JSON valide, sans texte additionnel.",
-            },
-            { role: "user", content: userPrompt },
-          ] as GroqMessage[],
-          temperature: 0.5,
-          max_tokens: 400,
-        }),
-      }
-    );
-
-    if (!groqRes.ok) {
-      const txt = await groqRes.text().catch(() => "");
-      console.error("[CartPilot] Groq HTTP error:", groqRes.status, txt);
-      return corsify(NextResponse.json({ suggestions: [] }, { status: 502 }));
-    }
-
-    const groqData = (await groqRes.json()) as GroqResponse;
-    const raw = groqData?.choices?.[0]?.message?.content ?? "[]";
-    const parsed = extractJsonArray(raw);
-    const suggestions = normalizeSuggestions(parsed);
-
-    return corsify(NextResponse.json({ suggestions }, { status: 200 }));
-  } catch (err) {
-    console.error("[CartPilot] erreur Groq", err);
-    return corsify(NextResponse.json({ suggestions: [] }, { status: 500 }));
-  }
+  const res = NextResponse.json({ suggestions: picked }, { status: 200 });
+  return corsify(res);
 }
 
-/* ------------------------------- OPTIONS ------------------------------- */
+/* -------------------------------- OPTIONS -------------------------------- */
 export async function OPTIONS() {
   const res = new NextResponse(null, { status: 204 });
   return corsify(res);
