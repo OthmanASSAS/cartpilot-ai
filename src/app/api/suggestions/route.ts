@@ -40,12 +40,19 @@ type Cart = {
 export type Suggestion = {
   id: string;
   title: string;
-  price?: number; // en euros
+  price?: number;
   reason?: string;
   handle?: string;
   image?: string;
-  variant_id?: string; // présent si ajout direct possible (1 variante)
+  variant_id?: string;
   has_multiple_variants?: boolean;
+
+  /** Quelle action doit exécuter le front */
+  action?: "add" | "set_qty" | "view";
+  /** Pour action "add" : combien ajouter */
+  add_quantity?: number;
+  /** Pour action "set_qty" : quantité cible à fixer dans le panier */
+  target_qty?: number;
 };
 
 /* --------------------------------- Utils ---------------------------------- */
@@ -114,6 +121,8 @@ function productToSuggestion(p: ShopifyProduct): Suggestion {
     image: firstImage(p),
     variant_id: hasMultiple ? undefined : variantId,
     has_multiple_variants: hasMultiple,
+    action: hasMultiple ? "view" : "add",
+    add_quantity: hasMultiple ? undefined : 1,
   };
 }
 
@@ -236,32 +245,33 @@ export async function POST(req: NextRequest) {
   }
 
   // 4) Si aucun candidat exploitable → mode mono (actions utilitaires)
-  if (filtered.length === 0) {
-    const first = cart.items[0];
-    if (first) {
-      const vId = String(first.variant_id || first.id || "");
-      const title = String(first.title || "Produit");
-      const qty = Number(first.quantity || 1); // ← on s'en sert dans la raison
-      const suggestions: Suggestion[] = [
-        {
-          id: "add-one",
-          title: `Ajoutez un ${title}`,
-          reason: "Rechange ou cadeau",
-          variant_id: vId,
-        },
-        {
-          id: "to-three",
-          title: "Passez au pack de 3",
-          reason:
-            qty < 3 ? `Passez de ${qty} à 3 unités` : "Économies immédiates",
-          variant_id: vId,
-        },
-      ];
-      const res = NextResponse.json({ suggestions });
-      return corsify(res);
-    }
-    // Panier vide → rien
-    return corsify(NextResponse.json({ suggestions: [] }));
+  const first = cart.items[0];
+  if (first) {
+    const vId = String(first.variant_id || first.id || "");
+    const title = String(first.title || "Produit");
+    const qty = Number(first.quantity || 1);
+
+    const suggestions: Suggestion[] = [
+      {
+        id: "to-three",
+        title: "Passez au pack de 3",
+        reason:
+          qty < 3 ? `Passez de ${qty} à 3 unités` : "Économies immédiates",
+        variant_id: vId,
+        action: "set_qty",
+        target_qty: 3, // 👈 fixe la quantité à 3
+      },
+      {
+        id: "add-one",
+        title: `Ajoutez un ${title}`,
+        reason: "Rechange ou cadeau",
+        variant_id: vId,
+        action: "add",
+        add_quantity: 1, // 👈 ajoute 1
+      },
+    ];
+
+    return corsify(NextResponse.json({ suggestions }));
   }
 
   // 5) Ordonnancement simple (proche en prix du 1er item du panier)
