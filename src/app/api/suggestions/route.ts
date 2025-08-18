@@ -227,28 +227,39 @@ async function rankWithGroqRAG(cart: Cart, filtered: ShopifyProduct[]) {
 function monoProductSuggestions(cart: Cart): Suggestion[] {
   const first = cart.items?.[0];
   if (!first) return [];
+
   const vId = String(first.variant_id || first.id || "");
   const title = String(first.title || "Produit");
   const qty = Number(first.quantity || 1);
 
-  return [
-    {
-      id: "to-three",
-      title: "Passez au pack de 3",
-      reason: qty < 3 ? `Passez de ${qty} à 3 unités` : "Économies immédiates",
-      variant_id: vId,
-      action: "set_qty",
-      target_qty: 3,
-    },
-    {
+  const out: Suggestion[] = [];
+
+  // A) Si 1 seule unité → proposer d'ajouter 1
+  if (qty < 2) {
+    out.push({
       id: "add-one",
       title: `Ajoutez un ${title}`,
       reason: "Rechange ou cadeau",
       variant_id: vId,
       action: "add",
       add_quantity: 1,
-    },
-  ];
+    });
+  }
+
+  // B) Si < 3 unités → proposer "Mettre à 3"
+  if (qty < 3) {
+    out.push({
+      id: "to-three",
+      title: "Passez au pack de 3",
+      reason: "Économies immédiates",
+      variant_id: vId,
+      action: "set_qty",
+      target_qty: 3,
+    });
+  }
+
+  // Toujours max 2 suggestions
+  return out.slice(0, 2);
 }
 
 /* ----------------------------- Collecte produits --------------------------- */
